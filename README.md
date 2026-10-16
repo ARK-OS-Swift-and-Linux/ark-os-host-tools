@@ -10,7 +10,7 @@ Per [ADR-0005](file:///home/aarav/repo/arkos/docs/decisions/ADR-0005-host-toolin
 
 ## Directory Organization
 
-- `aake/` - Design and implementation of the ARK-OS Automated Kernel and Environment build system (`aake`). Coordinates manifest resolution, toolchain invocation, source downloads, and target image generation.
+- `aake/` - Design, implementation, and bootstrap Makefile for the ARK-OS Automated Kernel and Environment build system (`aake`). Coordinates manifest resolution, toolchain invocation, Ninja build file generation, and target image generation. See [Aake Documentation](file:///home/aarav/repo/arkos/host-tools/aake/README.md).
 - `signing/` - Cryptographic signing tools, key management utilities, and artifact verification helpers for release builds.
 
 ---
