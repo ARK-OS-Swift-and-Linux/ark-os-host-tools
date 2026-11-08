@@ -156,6 +156,14 @@ int aake_run_tests(const aake_options_t *opts) {
             setenv("TMPDIR", "/tmp", 1);
         }
 
+        /* Prevent GTK/GIO from blocking on GVFS D-Bus timeouts */
+        if (!getenv("GIO_USE_VFS")) {
+            setenv("GIO_USE_VFS", "local", 1);
+        }
+        if (!getenv("GVFS_DISABLE_FUSE")) {
+            setenv("GVFS_DISABLE_FUSE", "1", 1);
+        }
+
         int res = aake_run_cmd(qemu_argv, false, NULL);
 
         aake_ui_info("QEMU session terminated. Serial output captured in: %s", serial_log);
