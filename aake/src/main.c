@@ -40,6 +40,8 @@ int aake_cmd_help(const aake_options_t *opts) {
     printf("  runtime-target        Build static musl PID 1 starter and Swift runtime\n");
     printf("  services / arkdiag    Build system diagnostics daemon\n");
     printf("  services-target       Build static musl diagnostics daemon\n");
+    printf("  shell / sash          Build interactive Swift shell\n");
+    printf("  shell-target          Build static musl interactive Swift shell\n");
     printf("  boot                  Build UEFI bootloader (ARKBOOT.EFI)\n");
     printf("  initramfs             Assemble initramfs with host glibc libraries\n");
     printf("  initramfs-target      Assemble static musl initramfs with mimalloc\n");
@@ -49,6 +51,7 @@ int aake_cmd_help(const aake_options_t *opts) {
     printf("  -v, --verbose         Print raw commands and detailed compiler output\n");
     printf("  --debug               Select debug configuration (default: release)\n");
     printf("  --release             Select release configuration\n");
+    printf("  --headless            Run VM test headless (-display none)\n");
     printf("  --out-dir <path>      Specify build output directory (default: out)\n\n");
     printf("Examples:\n");
     printf("  aake doctor\n");
@@ -127,6 +130,8 @@ int aake_cmd_clean(const aake_options_t *opts) {
         system(cmd);
         snprintf(cmd, sizeof(cmd), "make -C %s/components/services/arkdiag clean >/dev/null 2>&1", opts->repo_root);
         system(cmd);
+        snprintf(cmd, sizeof(cmd), "make -C %s/components/shell/sash clean >/dev/null 2>&1", opts->repo_root);
+        system(cmd);
         snprintf(cmd, sizeof(cmd), "make -C %s/components/boot clean >/dev/null 2>&1", opts->repo_root);
         system(cmd);
 
@@ -198,6 +203,8 @@ int main(int argc, char *argv[]) {
             opts.config = "release";
         } else if (strcmp(arg, "--uefi") == 0) {
             opts.boot_mode = BOOT_UEFI;
+        } else if (strcmp(arg, "--headless") == 0) {
+            opts.headless = true;
         } else if (strcmp(arg, "--bios") == 0) {
             opts.boot_mode = BOOT_BIOS;
         } else if (strcmp(arg, "--out-dir") == 0 && arg_i + 1 < argc) {

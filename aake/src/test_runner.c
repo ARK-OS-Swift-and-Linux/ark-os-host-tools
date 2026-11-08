@@ -57,6 +57,8 @@ int aake_run_tests(const aake_options_t *opts) {
         const char *ovmf = NULL;
         if (aake_file_exists("/usr/share/edk2/x64/OVMF.4m.fd")) {
             ovmf = "/usr/share/edk2/x64/OVMF.4m.fd";
+        } else if (aake_file_exists("/usr/share/OVMF/x64/OVMF.4m.fd")) {
+            ovmf = "/usr/share/OVMF/x64/OVMF.4m.fd";
         } else if (aake_file_exists("/usr/share/OVMF/OVMF_CODE.fd")) {
             ovmf = "/usr/share/OVMF/OVMF_CODE.fd";
         }
@@ -66,7 +68,40 @@ int aake_run_tests(const aake_options_t *opts) {
             return 1;
         }
 
-        char *esp_dir = aake_path_join(opts->repo_root, "components/boot/build/esp");
+        aake_mkdir_p(opts->out_dir);
+        char *serial_log = aake_path_join(opts->out_dir, "serial.log");
+
+        /* Check for assembled ESP partition */
+        char *out_esp = aake_path_join(opts->out_dir, "esp");
+        char *out_bootx64 = aake_path_join(out_esp, "EFI/BOOT/BOOTX64.EFI");
+        char *boot_esp = aake_path_join(opts->repo_root, "components/boot/build/esp");
+        char *boot_bootx64 = aake_path_join(boot_esp, "EFI/BOOT/BOOTX64.EFI");
+
+        char *esp_dir = NULL;
+        if (aake_file_exists(out_bootx64)) {
+            esp_dir = aake_strdup(out_esp);
+        } else if (aake_file_exists(boot_bootx64)) {
+            esp_dir = aake_strdup(boot_esp);
+        } else {
+            aake_ui_info("ESP boot image not found. Assembling via Ninja...");
+            ensure_ninja_built(opts, "esp-target");
+            if (aake_file_exists(out_bootx64)) {
+                esp_dir = aake_strdup(out_esp);
+            } else if (aake_file_exists(boot_bootx64)) {
+                esp_dir = aake_strdup(boot_esp);
+            }
+        }
+        free(out_esp);
+        free(out_bootx64);
+        free(boot_esp);
+        free(boot_bootx64);
+
+        if (!esp_dir) {
+            aake_ui_error("ESP boot partition not found. Run `aake build esp` or `aake build esp-target` first.");
+            free(serial_log);
+            return 1;
+        }
+
         char *bootx64 = aake_path_join(esp_dir, "EFI/BOOT/BOOTX64.EFI");
         char *initramfs = aake_path_join(esp_dir, "EFI/BOOT/initramfs.cpio");
         char *bzImage = aake_path_join(esp_dir, "EFI/BOOT/bzImage");
@@ -78,33 +113,58 @@ int aake_run_tests(const aake_options_t *opts) {
             free(bootx64);
             free(initramfs);
             free(bzImage);
+            free(serial_log);
             return 1;
         }
 
         char drive_arg[1024];
         snprintf(drive_arg, sizeof(drive_arg), "file=fat:rw:%s,format=raw", esp_dir);
 
-        const char *const qemu_argv[] = {
-            "qemu-system-x86_64",
-            "-bios", ovmf,
-            "-drive", drive_arg,
-            "-m", "1024M",
-            "-net", "none",
-            "-serial", "stdio",
-            "-vga", "std",
-            NULL
-        };
+        char chardev_arg[1024];
+        snprintf(chardev_arg, sizeof(chardev_arg), "stdio,id=char0,logfile=%s,signal=off", serial_log);
+
+        const char *qemu_argv[32];
+        int q_i = 0;
+        qemu_argv[q_i++] = "qemu-system-x86_64";
+        qemu_argv[q_i++] = "-bios";
+        qemu_argv[q_i++] = ovmf;
+        qemu_argv[q_i++] = "-drive";
+        qemu_argv[q_i++] = drive_arg;
+        qemu_argv[q_i++] = "-m";
+        qemu_argv[q_i++] = "2048M";
+        qemu_argv[q_i++] = "-net";
+        qemu_argv[q_i++] = "none";
+        qemu_argv[q_i++] = "-chardev";
+        qemu_argv[q_i++] = chardev_arg;
+        qemu_argv[q_i++] = "-serial";
+        qemu_argv[q_i++] = "chardev:char0";
+        qemu_argv[q_i++] = "-vga";
+        qemu_argv[q_i++] = "std";
+        if (opts->headless || getenv("AAKE_HEADLESS") || getenv("HEADLESS") || !getenv("DISPLAY")) {
+            qemu_argv[q_i++] = "-display";
+            qemu_argv[q_i++] = "none";
+        }
+        qemu_argv[q_i++] = NULL;
 
         aake_ui_info("Launching QEMU with UEFI OVMF firmware...");
         aake_ui_info("Firmware: %s", ovmf);
         aake_ui_info("ESP:      %s", esp_dir);
+        aake_ui_info("Serial:   %s", serial_log);
+
+        /* Ensure temporary backing files for virtual FAT drive go to /tmp */
+        if (!getenv("TMPDIR")) {
+            setenv("TMPDIR", "/tmp", 1);
+        }
 
         int res = aake_run_cmd(qemu_argv, false, NULL);
+
+        aake_ui_info("QEMU session terminated. Serial output captured in: %s", serial_log);
 
         free(esp_dir);
         free(bootx64);
         free(initramfs);
         free(bzImage);
+        free(serial_log);
         return res;
     }
 
@@ -113,6 +173,26 @@ int aake_run_tests(const aake_options_t *opts) {
     printf("Test Target: %s\n", (opts->target && *opts->target) ? opts->target : "runtime (test_supervisor)");
     printf("Backend:     Host Process Execution\n");
     printf("========================================\n\n");
+
+    if (opts->target && (strcmp(opts->target, "shell") == 0 || strcmp(opts->target, "sash") == 0)) {
+        char *sash_dir = aake_path_join(opts->repo_root, "components/shell/sash");
+        aake_ui_info("Executing Swift test suite for sash: %s", sash_dir);
+        double t_start = aake_get_time_seconds();
+        const char *const argv[] = { "swift", "test", "--package-path", sash_dir, NULL };
+        int ret = aake_run_cmd(argv, false, NULL);
+        double t_end = aake_get_time_seconds();
+        free(sash_dir);
+        printf("\n========================================\n");
+        if (ret == 0) {
+            printf("TEST SUITE SUCCESSFUL\n");
+            printf("All sash shell unit tests passed.\n");
+        } else {
+            printf("TEST SUITE FAILED (exit code %d)\n", ret);
+        }
+        printf("Elapsed: %.2fs\n", t_end - t_start);
+        printf("========================================\n");
+        return ret;
+    }
 
     bool test_target_musl = (opts->target && (strcmp(opts->target, "target") == 0 ||
                                               strcmp(opts->target, "runtime-target") == 0 ||

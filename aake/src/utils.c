@@ -114,6 +114,33 @@ char *aake_find_repo_root(void) {
         *last_slash = '\0';
     }
 
+    /* Check subdirectory arkos if called from parent workspace directory */
+    char *sub_manifest = aake_path_join(cwd, "arkos/manifests/components.toml");
+    if (aake_file_exists(sub_manifest)) {
+        free(sub_manifest);
+        return aake_path_join(cwd, "arkos");
+    }
+    free(sub_manifest);
+
+    /* Try locating relative to the aake binary itself via /proc/self/exe */
+    char exe[1024];
+    ssize_t len = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+    if (len > 0) {
+        exe[len] = '\0';
+        char *p = exe;
+        while (1) {
+            char *last_slash = strrchr(p, '/');
+            if (!last_slash || last_slash == p) break;
+            *last_slash = '\0';
+            char *m = aake_path_join(p, "manifests/components.toml");
+            if (aake_file_exists(m)) {
+                free(m);
+                return aake_strdup(p);
+            }
+            free(m);
+        }
+    }
+
     return aake_strdup(cwd);
 }
 

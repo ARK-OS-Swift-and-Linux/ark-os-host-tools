@@ -31,6 +31,7 @@ typedef struct {
     char *out_dir;         /* "out" by default */
     bool verbose;
     bool color;
+    bool headless;
     aake_boot_mode_t boot_mode;
     int argc;
     char **argv;
